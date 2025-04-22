@@ -9,6 +9,8 @@ from .models import AdminActivity
 
 User = get_user_model()
 
+# admin_console/auth_views.py - Update the AdminLoginView class
+
 class AdminLoginView(APIView):
     """
     Admin-specific login view that checks for staff privileges
@@ -44,7 +46,7 @@ class AdminLoginView(APIView):
         # Generate tokens
         refresh = RefreshToken.for_user(user)
         
-        # Prepare user data
+        # Prepare user data - ensure role is included
         user_data = {
             'id': user.id,
             'email': user.email,
@@ -53,6 +55,7 @@ class AdminLoginView(APIView):
             'last_name': user.last_name,
             'is_staff': user.is_staff,
             'is_superuser': user.is_superuser,
+            'role': 'admin' if user.is_staff else 'user'  # Add explicit role field
         }
         
         # Log admin login activity
@@ -69,8 +72,8 @@ class AdminLoginView(APIView):
             'access': str(refresh.access_token),
             'user': user_data
         })
-
-
+    
+    
 class AdminLogoutView(APIView):
     """
     Admin logout view that logs the activity
