@@ -53,6 +53,7 @@ INSTALLED_APPS = [
     'products',
     'orders',
     'contact',
+    'admin_console',
 ]
 
 # Debug toolbar - only in development

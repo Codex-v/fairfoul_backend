@@ -1,4 +1,3 @@
-# fairfoul/urls.py
 from django.contrib import admin
 from django.urls import path, include
 from django.conf import settings
@@ -31,6 +30,7 @@ urlpatterns = [
         path('products/', include('products.urls')),
         path('orders/', include('orders.urls')),
         path('contact/', include('contact.urls')),
+        path('admin-console/', include('admin_console.urls')),  # Added admin console URLs
     ])),
     
     # API documentation
