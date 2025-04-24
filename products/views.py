@@ -163,7 +163,7 @@ class ProductDetailView(generics.RetrieveUpdateDestroyAPIView):
     Retrieve, update or delete a product
     """
     permission_classes = [IsAdminUserOrReadOnly]
-    lookup_field = 'slug'
+    lookup_field = 'pk'
     
     def get_serializer_class(self):
         if self.request.method in ['PUT', 'PATCH']:
@@ -281,6 +281,7 @@ class ProductSizeDetailView(generics.RetrieveUpdateDestroyAPIView):
     queryset = ProductSize.objects.all()
     serializer_class = ProductSizeSerializer
     permission_classes = [permissions.IsAdminUser]
+
 
 
 class ProductColorListCreateView(generics.ListCreateAPIView):

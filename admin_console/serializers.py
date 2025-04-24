@@ -118,3 +118,109 @@ class AdminDashboardSerializer(serializers.Serializer):
             'top_categories': list(top_categories),
             'recent_activities': AdminActivitySerializer(recent_activities, many=True).data
         }
+    
+
+
+# admin_console/serializers.py - Update this part
+
+from django.contrib.auth import get_user_model
+from rest_framework import serializers
+from django.contrib.auth.password_validation import validate_password
+
+User = get_user_model()
+
+class AdminUserSerializer(serializers.ModelSerializer):
+    """
+    Serializer for admin user management
+    """
+    password = serializers.CharField(write_only=True, required=False, validators=[validate_password])
+    confirm_password = serializers.CharField(write_only=True, required=False)
+    orders_count = serializers.SerializerMethodField()
+    last_login_display = serializers.SerializerMethodField()
+    role = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = User
+        fields = (
+            'id', 'email', 'username', 'first_name', 'last_name', 
+            'is_active', 'is_staff', 'is_superuser', 'phone_number',
+            'date_joined', 'last_login', 'last_login_display',
+            'profile_picture', 'is_email_verified', 'password',
+            'confirm_password', 'orders_count', 'role'
+        )
+        read_only_fields = ('date_joined', 'last_login', 'orders_count', 'role')
+
+    def get_orders_count(self, obj):
+        """
+        Get the number of orders placed by the user
+        """
+        return obj.orders.count() if hasattr(obj, 'orders') else 0
+    
+    def get_last_login_display(self, obj):
+        """
+        Format last login date for display
+        """
+        if obj.last_login:
+            return obj.last_login.strftime("%Y-%m-%d %H:%M:%S")
+        return "Never"
+    
+    def get_role(self, obj):
+        """
+        Get the user's role
+        """
+        if obj.is_superuser:
+            return "superadmin"
+        elif obj.is_staff:
+            return "admin"
+        return "user"
+    
+    def validate(self, data):
+        """
+        Validate password confirmation matches
+        """
+        if 'password' in data and 'confirm_password' in data:
+            if data['password'] != data['confirm_password']:
+                raise serializers.ValidationError({
+                    "password": "Password fields didn't match."
+                })
+        
+        # Remove confirm_password from the data
+        if 'confirm_password' in data:
+            data.pop('confirm_password')
+            
+        return data
+    
+    def create(self, validated_data):
+        """
+        Create and return a new user with encrypted password
+        """
+        password = validated_data.pop('password', None)
+        
+        # Instead of getting role from context, get it from the view
+        # and add it as is_staff and is_superuser in validated_data
+        
+        user = User.objects.create(
+            **validated_data
+        )
+        
+        if password:
+            user.set_password(password)
+            user.save()
+            
+        return user
+    
+    def update(self, instance, validated_data):
+        """
+        Update user details, handling password updates separately
+        """
+        password = validated_data.pop('password', None)
+        
+        # Update user fields
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+            
+        if password:
+            instance.set_password(password)
+            
+        instance.save()
+        return instance

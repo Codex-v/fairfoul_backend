@@ -7,9 +7,15 @@ from .views import (
     DashboardMetricsView,
     AdminDashboardView,
     AdminReportingView,
-    LowStockProductsView  # Add the new view
+    LowStockProductsView
 )
 from .auth_views import AdminLoginView, AdminLogoutView, AdminVerifyTokenView
+from .views import (
+    AdminUserListCreateView,
+    AdminUserDetailView,
+    ToggleUserStatusView,
+    ChangeUserRoleView
+)
 
 urlpatterns = [
     # Admin activity endpoints
@@ -28,4 +34,10 @@ urlpatterns = [
     
     # Product management endpoints
     path('products/', LowStockProductsView.as_view(), name='low-stock-products'),
+    
+    # User management endpoints
+    path('users/', AdminUserListCreateView.as_view(), name='admin-user-list'),
+    path('users/<int:pk>/', AdminUserDetailView.as_view(), name='admin-user-detail'),
+    path('users/<int:pk>/toggle-status/', ToggleUserStatusView.as_view(), name='toggle-user-status'),
+    path('users/<int:pk>/change-role/', ChangeUserRoleView.as_view(), name='change-user-role'),
 ]

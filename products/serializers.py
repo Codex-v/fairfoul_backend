@@ -1,4 +1,5 @@
-# products/serializers.py
+# products/serializers.py - Update these serializers to match frontend expectations
+
 from rest_framework import serializers
 from .models import (
     Category, Color, Size, Product, ProductSize, 
@@ -132,6 +133,9 @@ class ProductListSerializer(serializers.ModelSerializer):
     category_name = serializers.StringRelatedField(source='category', read_only=True)
     discount_percentage = serializers.SerializerMethodField()
     primary_image = serializers.SerializerMethodField()
+    images = serializers.SerializerMethodField()
+    price = serializers.FloatField()  # Ensure price is returned as a number
+    original_price = serializers.FloatField(required=False, allow_null=True)  # Ensure original_price is a number
     
     class Meta:
         model = Product
@@ -139,7 +143,7 @@ class ProductListSerializer(serializers.ModelSerializer):
             'id', 'name', 'slug', 'category', 'category_name', 
             'price', 'original_price', 'discount_percentage',
             'primary_image', 'is_new', 'is_bestseller',
-            'in_stock', 'short_description'
+            'in_stock', 'short_description', 'images'
         )
     
     def get_discount_percentage(self, obj):
@@ -157,36 +161,61 @@ class ProductListSerializer(serializers.ModelSerializer):
             if request:
                 return request.build_absolute_uri(primary_image.image.url)
         return None
+    
+    def get_images(self, obj):
+        # Return a list of image URLs
+        request = self.context.get('request')
+        if request:
+            return [
+                request.build_absolute_uri(img.image.url) 
+                for img in obj.images.all()
+            ]
+        return []
 
 
 class ProductDetailSerializer(serializers.ModelSerializer):
     """
     Detailed serializer for single product view
     """
-    category_name = serializers.StringRelatedField(source='category', read_only=True)
+    category = CategorySerializer(read_only=True)
     discount_percentage = serializers.SerializerMethodField()
     highlights = ProductHighlightSerializer(many=True, read_only=True)
     specifications = ProductSpecificationSerializer(many=True, read_only=True)
     available_sizes = ProductSizeSerializer(source='productsize_set', many=True, read_only=True)
     colors = ProductColorSerializer(many=True, read_only=True)
     images = ProductImageSerializer(many=True, read_only=True)
+    rating = serializers.SerializerMethodField()
+    reviews_count = serializers.SerializerMethodField()
+    price = serializers.FloatField()  # Ensure price is returned as a number
+    original_price = serializers.FloatField(required=False, allow_null=True)  # Ensure original_price is a number
     
     class Meta:
         model = Product
         fields = (
-            'id', 'name', 'slug', 'category', 'category_name', 
+            'id', 'name', 'slug', 'category',
             'description', 'short_description',
             'price', 'original_price', 'discount_percentage',
             'fabric', 'fit', 'wash_care', 'model_size',
             'sku', 'in_stock', 'stock_quantity',
             'is_active', 'is_featured', 'is_new', 'is_bestseller',
             'highlights', 'specifications', 'available_sizes', 
-            'colors', 'images', 'created_at', 'updated_at'
+            'colors', 'images', 'rating', 'reviews_count',
+            'created_at', 'updated_at'
         )
         read_only_fields = ('slug', 'created_at', 'updated_at')
     
     def get_discount_percentage(self, obj):
         return obj.get_discount_percentage()
+    
+    def get_rating(self, obj):
+        # Placeholder - you would implement this based on your review model
+        # For now, returning a fixed rating of 4.5
+        return 4.5
+    
+    def get_reviews_count(self, obj):
+        # Placeholder - you would implement this based on your review model
+        # For now, returning a fixed count of 12
+        return 12
 
 
 class ProductCreateUpdateSerializer(serializers.ModelSerializer):

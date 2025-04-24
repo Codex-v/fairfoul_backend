@@ -17,6 +17,11 @@ urlpatterns = [
     path('categories/<slug:slug>/', CategoryDetailView.as_view(), name='category-detail'),
     path('categories/<slug:slug>/products/', CategoryProductsView.as_view(), name='category-products'),
     
+    # Product endpoints
+    path("product/",ProductListCreateView.as_view(),name="create-product"),
+    path("product/<int:pk>/",ProductDetailView.as_view(),name="create-product"),
+
+
     # Color endpoints
     path('colors/', ColorListCreateView.as_view(), name='color-list'),
     path('colors/<int:pk>/', ColorDetailView.as_view(), name='color-detail'),

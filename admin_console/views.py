@@ -19,6 +19,9 @@ from orders.models import Order
 from core.permissions import IsAdminUserOrReadOnly
 from products.serializers import ProductListSerializer
 
+
+
+
 class LowStockProductsView(generics.ListAPIView):
     """
     Admin view for products with low stock
@@ -184,4 +187,230 @@ class AdminReportingView(APIView):
             return Response(
                 {"detail": "Invalid report type"}, 
                 status=status.HTTP_400_BAD_REQUEST
+            )
+# admin_console/user_views.py
+from rest_framework import generics, permissions, status, filters
+from rest_framework.response import Response
+from rest_framework.views import APIView
+from django.contrib.auth import get_user_model
+from django.db.models import Q
+
+from .models import AdminActivity
+from .serializers import AdminUserSerializer
+
+User = get_user_model()
+
+class AdminUserListCreateView(generics.ListCreateAPIView):
+    """
+    List all users or create a new one (admin only)
+    """
+    permission_classes = [permissions.IsAdminUser]
+    serializer_class = AdminUserSerializer
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['email', 'username', 'first_name', 'last_name', 'phone_number']
+    ordering_fields = ['date_joined', 'email', 'username', 'last_name']
+    
+    def get_queryset(self):
+        queryset = User.objects.all().order_by('-date_joined')
+        
+        # Filter by active status
+        is_active = self.request.query_params.get('is_active')
+        if is_active is not None:
+            is_active_bool = is_active.lower() == 'true'
+            queryset = queryset.filter(is_active=is_active_bool)
+        
+        # Filter by staff status
+        is_staff = self.request.query_params.get('is_staff')
+        if is_staff is not None:
+            is_staff_bool = is_staff.lower() == 'true'
+            queryset = queryset.filter(is_staff=is_staff_bool)
+        
+        # Filter by role
+        role = self.request.query_params.get('role')
+        if role:
+            if role == 'user':
+                queryset = queryset.filter(is_staff=False, is_superuser=False)
+            elif role == 'admin':
+                queryset = queryset.filter(is_staff=True, is_superuser=False)
+            elif role == 'superadmin':
+                queryset = queryset.filter(is_superuser=True)
+        
+        # Search by query parameter
+        query = self.request.query_params.get('q')
+        if query:
+            queryset = queryset.filter(
+                Q(email__icontains=query) |
+                Q(username__icontains=query) |
+                Q(first_name__icontains=query) |
+                Q(last_name__icontains=query)
+            )
+        
+        return queryset
+    
+    def perform_create(self, serializer):
+        # Check if role is provided in request data
+        role = self.request.data.get('role')
+        
+        # Set the is_staff and is_superuser values based on the role
+        user_data = {}
+        if role:
+            if role == 'admin':
+                user_data['is_staff'] = True
+                user_data['is_superuser'] = False
+            elif role == 'superadmin':
+                user_data['is_staff'] = True
+                user_data['is_superuser'] = True
+            else:  # Default to regular user
+                user_data['is_staff'] = False
+                user_data['is_superuser'] = False
+        
+        # Create user with updated data
+        user = serializer.save(**user_data)
+        
+        # Log admin activity
+        AdminActivity.objects.create(
+            user=self.request.user,
+            activity_type='user_created',
+            description=f'User created: {user.email}',
+            ip_address=self.request.META.get('REMOTE_ADDR', '')
+        )
+
+
+class AdminUserDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """
+    Retrieve, update or delete a user (admin only)
+    """
+    queryset = User.objects.all()
+    serializer_class = AdminUserSerializer
+    permission_classes = [permissions.IsAdminUser]
+    
+    def perform_update(self, serializer):
+        # Check if role is provided in request data
+        role = self.request.data.get('role')
+        
+        # Set the is_staff and is_superuser values based on the role
+        user_data = {}
+        if role:
+            if role == 'admin':
+                user_data['is_staff'] = True
+                user_data['is_superuser'] = False
+            elif role == 'superadmin':
+                user_data['is_staff'] = True
+                user_data['is_superuser'] = True
+            elif role == 'user':
+                user_data['is_staff'] = False
+                user_data['is_superuser'] = False
+        
+        # Update user with role data if provided
+        user = serializer.save(**user_data)
+        
+        # Log admin activity
+        AdminActivity.objects.create(
+            user=self.request.user,
+            activity_type='user_updated',
+            description=f'User updated: {user.email}',
+            ip_address=self.request.META.get('REMOTE_ADDR', '')
+        )
+    
+    def perform_destroy(self, instance):
+        email = instance.email
+        instance.delete()
+        
+        # Log admin activity
+        AdminActivity.objects.create(
+            user=self.request.user,
+            activity_type='user_deleted',
+            description=f'User deleted: {email}',
+            ip_address=self.request.META.get('REMOTE_ADDR', '')
+        )
+
+
+class ToggleUserStatusView(APIView):
+    """
+    Toggle user active status (admin only)
+    """
+    permission_classes = [permissions.IsAdminUser]
+    
+    def post(self, request, pk):
+        try:
+            user = User.objects.get(pk=pk)
+            user.is_active = not user.is_active
+            user.save()
+            
+            status_str = "activated" if user.is_active else "deactivated"
+            
+            # Log admin activity
+            AdminActivity.objects.create(
+                user=request.user,
+                activity_type='user_updated',
+                description=f'User {status_str}: {user.email}',
+                ip_address=request.META.get('REMOTE_ADDR', '')
+            )
+            
+            return Response({
+                'success': True,
+                'is_active': user.is_active,
+                'message': f'User has been {status_str}'
+            })
+        except User.DoesNotExist:
+            return Response(
+                {'error': 'User not found'}, 
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+
+class ChangeUserRoleView(APIView):
+    """
+    Change user role (admin only)
+    """
+    permission_classes = [permissions.IsAdminUser]
+    
+    def post(self, request, pk):
+        try:
+            # Only superusers can assign superadmin role
+            if not request.user.is_superuser and request.data.get('role') == 'superadmin':
+                return Response(
+                    {'error': 'Only superusers can assign superadmin role'},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+            
+            user = User.objects.get(pk=pk)
+            role = request.data.get('role')
+            
+            if not role or role not in ['user', 'admin', 'superadmin']:
+                return Response(
+                    {'error': 'Invalid role. Must be one of: user, admin, superadmin'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Set permissions based on role
+            if role == 'user':
+                user.is_staff = False
+                user.is_superuser = False
+            elif role == 'admin':
+                user.is_staff = True
+                user.is_superuser = False
+            elif role == 'superadmin':
+                user.is_staff = True
+                user.is_superuser = True
+            
+            user.save()
+            
+            # Log admin activity
+            AdminActivity.objects.create(
+                user=request.user,
+                activity_type='user_updated',
+                description=f'User role changed to {role}: {user.email}',
+                ip_address=request.META.get('REMOTE_ADDR', '')
+            )
+            
+            return Response({
+                'success': True,
+                'role': role,
+                'message': f'User role has been changed to {role}'
+            })
+        except User.DoesNotExist:
+            return Response(
+                {'error': 'User not found'}, 
+                status=status.HTTP_404_NOT_FOUND
             )
