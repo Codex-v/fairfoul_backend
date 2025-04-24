@@ -1,10 +1,9 @@
 # orders/views.py
-from rest_framework import viewsets, generics, permissions, status
-from rest_framework.decorators import action
+from rest_framework import generics, permissions, status
 from rest_framework.response import Response
+from rest_framework.views import APIView
 from django.shortcuts import get_object_or_404
 from django.db import transaction
-from django.contrib.auth import get_user_model
 import uuid
 
 from .models import Cart, CartItem, Order, OrderItem, Coupon, OrderEvent
@@ -18,7 +17,6 @@ from .serializers import (
 )
 from core.permissions import IsOwnerOrAdmin
 
-User = get_user_model()
 
 class CartView(generics.RetrieveAPIView):
     """
@@ -32,14 +30,14 @@ class CartView(generics.RetrieveAPIView):
         return cart
 
 
-class CartItemViewSet(viewsets.ModelViewSet):
+class CartItemListCreateView(generics.ListCreateAPIView):
     """
-    CRUD operations for cart items
+    List all cart items or create a new one
     """
     permission_classes = [permissions.IsAuthenticated]
     
     def get_serializer_class(self):
-        if self.action == 'create':
+        if self.request.method == 'POST':
             return CartItemCreateSerializer
         return CartItemSerializer
     
@@ -57,22 +55,41 @@ class CartItemViewSet(viewsets.ModelViewSet):
         cart_serializer = CartSerializer(cart, context={'request': request})
         
         return Response(cart_serializer.data, status=status.HTTP_201_CREATED)
+
+
+class CartItemDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """
+    Retrieve, update or delete a cart item
+    """
+    serializer_class = CartItemSerializer
+    permission_classes = [permissions.IsAuthenticated]
     
-    @action(detail=False, methods=['delete'])
-    def clear(self, request):
-        """
-        Clear all items from the cart
-        """
+    def get_queryset(self):
+        cart, created = Cart.objects.get_or_create(user=self.request.user)
+        return CartItem.objects.filter(cart=cart)
+
+
+class CartClearView(APIView):
+    """
+    Clear all items from the cart
+    """
+    permission_classes = [permissions.IsAuthenticated]
+    
+    def delete(self, request):
         cart, created = Cart.objects.get_or_create(user=request.user)
         cart.items.all().delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class CartItemQuantityUpdateView(APIView):
+    """
+    Update cart item quantity
+    """
+    permission_classes = [permissions.IsAuthenticated]
     
-    @action(detail=True, methods=['patch'])
-    def update_quantity(self, request, pk=None):
-        """
-        Update cart item quantity
-        """
-        cart_item = self.get_object()
+    def patch(self, request, pk):
+        cart, created = Cart.objects.get_or_create(user=request.user)
+        cart_item = get_object_or_404(CartItem, pk=pk, cart=cart)
         quantity = request.data.get('quantity', 1)
         
         # Ensure quantity is at least 1
@@ -94,20 +111,18 @@ class CartItemViewSet(viewsets.ModelViewSet):
         cart_item.save()
         
         # Return the updated cart
-        cart = Cart.objects.get(user=request.user)
         cart_serializer = CartSerializer(cart, context={'request': request})
-        
         return Response(cart_serializer.data)
 
 
-class OrderViewSet(viewsets.ModelViewSet):
+class OrderListCreateView(generics.ListCreateAPIView):
     """
-    CRUD operations for orders
+    List all orders or create a new one
     """
     permission_classes = [permissions.IsAuthenticated, IsOwnerOrAdmin]
     
     def get_serializer_class(self):
-        if self.action == 'create':
+        if self.request.method == 'POST':
             return OrderCreateSerializer
         return OrderSerializer
     
@@ -218,13 +233,33 @@ class OrderViewSet(viewsets.ModelViewSet):
         # Return the created order
         order_serializer = OrderSerializer(order, context={'request': request})
         return Response(order_serializer.data, status=status.HTTP_201_CREATED)
+
+
+class OrderDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """
+    Retrieve, update or delete an order
+    """
+    serializer_class = OrderSerializer
+    permission_classes = [permissions.IsAuthenticated, IsOwnerOrAdmin]
     
-    @action(detail=True, methods=['post'])
-    def cancel(self, request, pk=None):
-        """
-        Cancel an order if it's not shipped yet
-        """
-        order = self.get_object()
+    def get_queryset(self):
+        if self.request.user.is_staff:
+            return Order.objects.all()
+        return Order.objects.filter(user=self.request.user)
+
+
+class OrderCancelView(APIView):
+    """
+    Cancel an order if it's not shipped yet
+    """
+    permission_classes = [permissions.IsAuthenticated, IsOwnerOrAdmin]
+    
+    def post(self, request, pk):
+        # Get the order
+        if request.user.is_staff:
+            order = get_object_or_404(Order, pk=pk)
+        else:
+            order = get_object_or_404(Order, pk=pk, user=request.user)
         
         # Check if order can be cancelled
         if order.order_status in ['shipped', 'delivered']:
@@ -245,13 +280,21 @@ class OrderViewSet(viewsets.ModelViewSet):
         )
         
         return Response({"detail": "Order cancelled successfully"})
+
+
+class OrderNoteAddView(APIView):
+    """
+    Add a note to an order
+    """
+    permission_classes = [permissions.IsAuthenticated, IsOwnerOrAdmin]
     
-    @action(detail=True, methods=['post'])
-    def add_note(self, request, pk=None):
-        """
-        Add a note to an order
-        """
-        order = self.get_object()
+    def post(self, request, pk):
+        # Get the order
+        if request.user.is_staff:
+            order = get_object_or_404(Order, pk=pk)
+        else:
+            order = get_object_or_404(Order, pk=pk, user=request.user)
+        
         note = request.data.get('note', '')
         
         if not note:
@@ -271,20 +314,33 @@ class OrderViewSet(viewsets.ModelViewSet):
         return Response({"detail": "Note added successfully"})
 
 
-class AdminOrderViewSet(viewsets.ModelViewSet):
+# Admin-only order management views
+class AdminOrderListView(generics.ListAPIView):
     """
-    Admin-only order management
+    List all orders (admin only)
     """
     queryset = Order.objects.all()
     serializer_class = OrderSerializer
     permission_classes = [permissions.IsAdminUser]
+
+
+class AdminOrderDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """
+    Retrieve, update or delete an order (admin only)
+    """
+    queryset = Order.objects.all()
+    serializer_class = OrderSerializer
+    permission_classes = [permissions.IsAdminUser]
+
+
+class AdminOrderStatusUpdateView(APIView):
+    """
+    Update order status (admin only)
+    """
+    permission_classes = [permissions.IsAdminUser]
     
-    @action(detail=True, methods=['post'])
-    def update_status(self, request, pk=None):
-        """
-        Update order status (admin only)
-        """
-        order = self.get_object()
+    def post(self, request, pk):
+        order = get_object_or_404(Order, pk=pk)
         status_value = request.data.get('status')
         
         if not status_value or status_value not in dict(Order.ORDER_STATUS_CHOICES):
@@ -325,13 +381,16 @@ class AdminOrderViewSet(viewsets.ModelViewSet):
                 )
         
         return Response({"detail": "Order status updated successfully"})
+
+
+class AdminOrderPaymentUpdateView(APIView):
+    """
+    Update payment status (admin only)
+    """
+    permission_classes = [permissions.IsAdminUser]
     
-    @action(detail=True, methods=['post'])
-    def update_payment(self, request, pk=None):
-        """
-        Update payment status (admin only)
-        """
-        order = self.get_object()
+    def post(self, request, pk):
+        order = get_object_or_404(Order, pk=pk)
         payment_status = request.data.get('payment_status')
         
         if not payment_status or payment_status not in dict(Order.PAYMENT_STATUS_CHOICES):
@@ -356,24 +415,33 @@ class AdminOrderViewSet(viewsets.ModelViewSet):
         return Response({"detail": "Payment status updated successfully"})
 
 
-class CouponViewSet(viewsets.ModelViewSet):
+# Coupon views
+class CouponListCreateView(generics.ListCreateAPIView):
     """
-    CRUD operations for coupons (admin only)
+    List all coupons or create a new one (admin only)
     """
     queryset = Coupon.objects.all()
     serializer_class = CouponSerializer
     permission_classes = [permissions.IsAdminUser]
 
 
-class ValidateCouponView(generics.GenericAPIView):
+class CouponDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """
+    Retrieve, update or delete a coupon (admin only)
+    """
+    queryset = Coupon.objects.all()
+    serializer_class = CouponSerializer
+    permission_classes = [permissions.IsAdminUser]
+
+
+class ValidateCouponView(APIView):
     """
     Validate a coupon code
     """
-    serializer_class = CouponValidateSerializer
     permission_classes = [permissions.IsAuthenticated]
     
     def post(self, request):
-        serializer = self.get_serializer(data=request.data)
+        serializer = CouponValidateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         
         code = serializer.validated_data['code']

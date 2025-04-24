@@ -1,6 +1,6 @@
 # users/views.py
-from rest_framework import viewsets, generics, permissions, status
-from rest_framework.decorators import api_view, permission_classes, action
+from rest_framework import generics, permissions, status
+from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -10,7 +10,7 @@ from django.contrib.auth.tokens import default_token_generator
 from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
 from django.utils.encoding import force_bytes, force_str
 from django.core.mail import send_mail
-from django.urls import reverse
+from django.shortcuts import get_object_or_404
 
 from .models import Address
 from .serializers import (
@@ -115,12 +115,12 @@ class ChangePasswordView(generics.UpdateAPIView):
         }, status=status.HTTP_200_OK)
 
 
-class AddressViewSet(viewsets.ModelViewSet):
+class AddressListCreateView(generics.ListCreateAPIView):
     """
-    ViewSet for managing user addresses
+    List all addresses or create a new one
     """
     serializer_class = AddressSerializer
-    permission_classes = [permissions.IsAuthenticated, IsOwnerOrAdmin]
+    permission_classes = [permissions.IsAuthenticated]
     
     def get_queryset(self):
         """
@@ -128,34 +128,58 @@ class AddressViewSet(viewsets.ModelViewSet):
         """
         return Address.objects.filter(user=self.request.user)
     
-    @action(detail=False, methods=['get'])
-    def default_shipping(self, request):
-        """
-        Get user's default shipping address
-        """
+    def perform_create(self, serializer):
+        serializer.save(user=self.request.user)
+
+
+class AddressDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """
+    Retrieve, update or delete an address
+    """
+    serializer_class = AddressSerializer
+    permission_classes = [permissions.IsAuthenticated, IsOwnerOrAdmin]
+    
+    def get_queryset(self):
+        if self.request.user.is_staff:
+            return Address.objects.all()
+        return Address.objects.filter(user=self.request.user)
+
+
+class DefaultShippingAddressView(generics.RetrieveAPIView):
+    """
+    Get user's default shipping address
+    """
+    serializer_class = AddressSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    
+    def get_object(self):
         address = Address.objects.filter(
-            user=request.user,
+            user=self.request.user,
             is_default=True,
             address_type__in=['shipping', 'both']
         ).first()
         
-        if address:
-            serializer = self.get_serializer(address)
-            return Response(serializer.data)
-        return Response({'detail': 'No default shipping address found.'}, status=status.HTTP_404_NOT_FOUND)
+        if not address:
+            return Response({'detail': 'No default shipping address found.'}, status=status.HTTP_404_NOT_FOUND)
+        
+        return address
+
+
+class DefaultBillingAddressView(generics.RetrieveAPIView):
+    """
+    Get user's default billing address
+    """
+    serializer_class = AddressSerializer
+    permission_classes = [permissions.IsAuthenticated]
     
-    @action(detail=False, methods=['get'])
-    def default_billing(self, request):
-        """
-        Get user's default billing address
-        """
+    def get_object(self):
         address = Address.objects.filter(
-            user=request.user,
+            user=self.request.user,
             is_default=True,
             address_type__in=['billing', 'both']
         ).first()
         
-        if address:
-            serializer = self.get_serializer(address)
-            return Response(serializer.data)
-        return Response({'detail': 'No default billing address found.'}, status=status.HTTP_404_NOT_FOUND)
+        if not address:
+            return Response({'detail': 'No default billing address found.'}, status=status.HTTP_404_NOT_FOUND)
+        
+        return address

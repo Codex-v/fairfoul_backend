@@ -1,6 +1,5 @@
 # users/urls.py
-from django.urls import path, include
-from rest_framework.routers import DefaultRouter
+from django.urls import path
 from rest_framework_simplejwt.views import (
     TokenObtainPairView,
     TokenRefreshView,
@@ -8,11 +7,9 @@ from rest_framework_simplejwt.views import (
 )
 from .views import (
     RegisterView, UserProfileView, ChangePasswordView,
-    verify_email, AddressViewSet
+    verify_email, AddressListCreateView, AddressDetailView,
+    DefaultShippingAddressView, DefaultBillingAddressView
 )
-
-router = DefaultRouter()
-router.register(r'addresses', AddressViewSet, basename='address')
 
 urlpatterns = [
     # Authentication endpoints
@@ -27,5 +24,8 @@ urlpatterns = [
     path('change-password/', ChangePasswordView.as_view(), name='change_password'),
     
     # Address endpoints
-    path('', include(router.urls)),
+    path('addresses/', AddressListCreateView.as_view(), name='address-list'),
+    path('addresses/<int:pk>/', AddressDetailView.as_view(), name='address-detail'),
+    path('addresses/default-shipping/', DefaultShippingAddressView.as_view(), name='default-shipping-address'),
+    path('addresses/default-billing/', DefaultBillingAddressView.as_view(), name='default-billing-address'),
 ]

@@ -1,11 +1,11 @@
 # admin_console/views.py
-from rest_framework import viewsets, generics, permissions, status
-from rest_framework.decorators import action
+from rest_framework import generics, permissions, status, filters
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from django.db.models import Q
+from django.db.models import Q, Sum, Count
 from django.utils import timezone
-from django.db import transaction
+from django.db.models.functions import TruncMonth
+
 
 from .models import AdminActivity, DashboardMetrics
 from .serializers import (
@@ -15,16 +15,50 @@ from .serializers import (
 )
 from users.models import User
 from products.models import Product
-from orders.models import Order, Coupon
+from orders.models import Order
 from core.permissions import IsAdminUserOrReadOnly
+from products.serializers import ProductListSerializer
 
-from admin_console import models
+class LowStockProductsView(generics.ListAPIView):
+    """
+    Admin view for products with low stock
+    """
+    serializer_class = ProductListSerializer
+    permission_classes = [permissions.IsAdminUser]
+    
+    def get_queryset(self):
+        """
+        Return products with low stock, filtered by various parameters
+        """
+        # Default threshold value for what's considered "low stock"
+        threshold = int(self.request.query_params.get('threshold', 5))
+        
+        # Build the base queryset for low stock items
+        queryset = Product.objects.filter(
+            Q(stock_quantity__lte=threshold) | 
+            Q(productsize__stock_quantity__lte=threshold)
+        ).distinct()
+        
+        # Filter by stock status if specified
+        in_stock = self.request.query_params.get('in_stock')
+        if in_stock is not None:
+            in_stock_bool = in_stock.lower() == 'true'
+            queryset = queryset.filter(in_stock=in_stock_bool)
+        
+        # Filter by category if specified
+        category = self.request.query_params.get('category')
+        if category:
+            queryset = queryset.filter(category__slug=category)
+        
+        # Return paginated, ordered results
+        return queryset.order_by('stock_quantity')
 
-class AdminActivityViewSet(viewsets.ModelViewSet):
+
+
+class AdminActivityListCreateView(generics.ListCreateAPIView):
     """
-    ViewSet for admin activities
+    List all admin activities or create a new one
     """
-    queryset = AdminActivity.objects.all()
     serializer_class = AdminActivitySerializer
     permission_classes = [permissions.IsAdminUser]
     
@@ -48,6 +82,15 @@ class AdminActivityViewSet(viewsets.ModelViewSet):
         return queryset.order_by('-created_at')
 
 
+class AdminActivityDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """
+    Retrieve, update or delete an admin activity
+    """
+    queryset = AdminActivity.objects.all()
+    serializer_class = AdminActivitySerializer
+    permission_classes = [permissions.IsAdminUser]
+
+
 class DashboardMetricsView(generics.RetrieveAPIView):
     """
     Retrieve dashboard metrics
@@ -67,7 +110,7 @@ class DashboardMetricsView(generics.RetrieveAPIView):
         # Calculate total revenue (from completed orders)
         metrics.total_revenue = Order.objects.filter(
             order_status='delivered'
-        ).aggregate(total=models.Sum('total'))['total'] or 0
+        ).aggregate(total=Sum('total'))['total'] or 0
         
         metrics.save()
         return metrics
@@ -122,7 +165,8 @@ class AdminReportingView(APIView):
                 total_orders=Count('orderitem', filter=Q(orderitem__order__order_status='delivered'))
             ).order_by('-total_sales')[:10]
             
-            serializer = ProductPerformanceSerializer(product_performance, many=True)
+            from products.serializers import ProductListSerializer
+            serializer = ProductListSerializer(product_performance, many=True, context={'request': request})
             return Response(serializer.data)
         
         elif report_type == 'user_activity':
@@ -132,7 +176,8 @@ class AdminReportingView(APIView):
                 total_spent=Sum('orders__total', filter=Q(orders__order_status='delivered'))
             ).order_by('-total_spent')[:50]
             
-            serializer = UserActivitySerializer(user_activity, many=True)
+            from users.serializers import UserProfileSerializer
+            serializer = UserProfileSerializer(user_activity, many=True)
             return Response(serializer.data)
         
         else:

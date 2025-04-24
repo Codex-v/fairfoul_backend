@@ -1,15 +1,14 @@
-from rest_framework import viewsets, permissions, status
+from rest_framework import generics, permissions, status
 from rest_framework.response import Response
 from django.core.mail import send_mail
 from django.conf import settings
 from .models import ContactMessage
 from .serializers import ContactMessageSerializer
 
-class ContactMessageViewSet(viewsets.ModelViewSet):
+class ContactMessageListCreateView(generics.ListCreateAPIView):
     """
-    ViewSet for contact messages
+    List all contact messages or create a new one
     """
-    queryset = ContactMessage.objects.all()
     serializer_class = ContactMessageSerializer
     
     def get_permissions(self):
@@ -17,11 +16,14 @@ class ContactMessageViewSet(viewsets.ModelViewSet):
         Admin users can view all messages
         Anonymous users can create messages
         """
-        if self.action == 'create':
+        if self.request.method == 'POST':
             permission_classes = [permissions.AllowAny]
         else:
             permission_classes = [permissions.IsAdminUser]
         return [permission() for permission in permission_classes]
+    
+    def get_queryset(self):
+        return ContactMessage.objects.all()
     
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
@@ -56,3 +58,12 @@ class ContactMessageViewSet(viewsets.ModelViewSet):
             status=status.HTTP_201_CREATED,
             headers=headers
         )
+
+
+class ContactMessageDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """
+    Retrieve, update or delete a contact message
+    """
+    queryset = ContactMessage.objects.all()
+    serializer_class = ContactMessageSerializer
+    permission_classes = [permissions.IsAdminUser]

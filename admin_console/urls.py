@@ -1,24 +1,20 @@
 # admin_console/urls.py
 from django.urls import path, include
-from rest_framework.routers import DefaultRouter
 
 from .views import (
-    AdminActivityViewSet, 
+    AdminActivityListCreateView,
+    AdminActivityDetailView,
     DashboardMetricsView,
     AdminDashboardView,
-    AdminReportingView
+    AdminReportingView,
+    LowStockProductsView  # Add the new view
 )
-# from .admin_user_views import AdminUserViewSet
 from .auth_views import AdminLoginView, AdminLogoutView, AdminVerifyTokenView
 
-# Router for admin activities
-router = DefaultRouter()
-router.register(r'activities', AdminActivityViewSet, basename='admin-activity')
-# router.register(r'users', AdminUserViewSet, basename='admin-user')
-
 urlpatterns = [
-    # Include router URLs
-    path('', include(router.urls)),
+    # Admin activity endpoints
+    path('activities/', AdminActivityListCreateView.as_view(), name='admin-activity-list'),
+    path('activities/<int:pk>/', AdminActivityDetailView.as_view(), name='admin-activity-detail'),
     
     # Admin authentication endpoints
     path('auth/login/', AdminLoginView.as_view(), name='admin_login'),
@@ -29,4 +25,7 @@ urlpatterns = [
     path('metrics/', DashboardMetricsView.as_view(), name='dashboard-metrics'),
     path('dashboard/', AdminDashboardView.as_view(), name='admin-dashboard'),
     path('reporting/', AdminReportingView.as_view(), name='admin-reporting'),
+    
+    # Product management endpoints
+    path('products/', LowStockProductsView.as_view(), name='low-stock-products'),
 ]
