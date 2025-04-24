@@ -1,6 +1,6 @@
 # products/views_admin.py
-from rest_framework import viewsets, status, parsers
-from rest_framework.decorators import action
+from rest_framework import generics, status, parsers
+from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAdminUser
 from django.db import transaction
@@ -12,27 +12,21 @@ from .models import (
 )
 from .serializers import (
     ProductDetailSerializer, ProductImageSerializer, ProductSizeSerializer, 
-    ProductColorSerializer, ColorSerializer, SizeSerializer, CategorySerializer
-)
-from .serializers_admin import (
-    ProductCreateUpdateSerializer, AdminProductSizeSerializer, AdminProductColorSerializer
+    ProductColorSerializer, ColorSerializer, SizeSerializer, CategorySerializer,
+    ProductCreateUpdateSerializer
 )
 
-class AdminProductViewSet(viewsets.ModelViewSet):
+class AdminProductListCreateView(generics.ListCreateAPIView):
     """
-    Admin-only viewset for product management
+    Admin-only view for listing and creating products
     """
     permission_classes = [IsAdminUser]
-    lookup_field = 'slug'
-    parser_classes = [parsers.MultiPartParser, parsers.FormParser, parsers.JSONParser]
+    queryset = Product.objects.all().order_by('-created_at')
     
     def get_serializer_class(self):
-        if self.action in ['create', 'update', 'partial_update']:
+        if self.request.method == 'POST':
             return ProductCreateUpdateSerializer
         return ProductDetailSerializer
-    
-    def get_queryset(self):
-        return Product.objects.all().order_by('-created_at')
     
     @transaction.atomic
     def create(self, request, *args, **kwargs):
@@ -74,6 +68,20 @@ class AdminProductViewSet(viewsets.ModelViewSet):
             product, context={'request': request}
         )
         return Response(output_serializer.data, status=status.HTTP_201_CREATED)
+
+
+class AdminProductRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
+    """
+    Admin-only view for retrieving, updating and deleting products
+    """
+    permission_classes = [IsAdminUser]
+    lookup_field = 'slug'
+    queryset = Product.objects.all()
+    
+    def get_serializer_class(self):
+        if self.request.method in ['PUT', 'PATCH']:
+            return ProductCreateUpdateSerializer
+        return ProductDetailSerializer
     
     @transaction.atomic
     def update(self, request, *args, **kwargs):
@@ -127,13 +135,20 @@ class AdminProductViewSet(viewsets.ModelViewSet):
             product, context={'request': request}
         )
         return Response(output_serializer.data)
+
+
+class AdminProductImageUploadView(APIView):
+    """
+    Admin-only view for uploading product images
+    """
+    permission_classes = [IsAdminUser]
+    parser_classes = [parsers.MultiPartParser, parsers.FormParser]
     
-    @action(detail=True, methods=['post'])
-    def upload_image(self, request, slug=None):
+    def post(self, request, slug=None):
         """
         Upload an image for a product
         """
-        product = self.get_object()
+        product = get_object_or_404(Product, slug=slug)
         
         # Get image parameters
         image = request.FILES.get('image')
@@ -190,13 +205,19 @@ class AdminProductViewSet(viewsets.ModelViewSet):
             product_image, context={'request': request}
         )
         return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+class AdminProductImageDeleteView(APIView):
+    """
+    Admin-only view for deleting product images
+    """
+    permission_classes = [IsAdminUser]
     
-    @action(detail=True, methods=['delete', 'post'])
-    def delete_image(self, request, slug=None):
+    def post(self, request, slug=None):
         """
         Delete a product image
         """
-        product = self.get_object()
+        product = get_object_or_404(Product, slug=slug)
         image_id = request.data.get('image_id')
         
         if not image_id:
@@ -214,13 +235,19 @@ class AdminProductViewSet(viewsets.ModelViewSet):
                 {'error': 'Image not found'},
                 status=status.HTTP_404_NOT_FOUND
             )
+
+
+class AdminProductImageSetPrimaryView(APIView):
+    """
+    Admin-only view for setting a product image as primary
+    """
+    permission_classes = [IsAdminUser]
     
-    @action(detail=True, methods=['post'])
-    def set_primary_image(self, request, slug=None):
+    def post(self, request, slug=None):
         """
         Set an image as the primary image for a product or color
         """
-        product = self.get_object()
+        product = get_object_or_404(Product, slug=slug)
         image_id = request.data.get('image_id')
         
         if not image_id:
@@ -262,201 +289,18 @@ class AdminProductViewSet(viewsets.ModelViewSet):
             )
 
 
-class AdminCategoryViewSet(viewsets.ModelViewSet):
+class AdminProductImageBulkUploadView(APIView):
     """
-    Admin-only viewset for category management
+    Admin-only view for bulk uploading product images
     """
-    queryset = Category.objects.all()
-    serializer_class = CategorySerializer
-    permission_classes = [IsAdminUser]
-    lookup_field = 'slug'
-
-
-class AdminColorViewSet(viewsets.ModelViewSet):
-    """
-    Admin-only viewset for color management
-    """
-    queryset = Color.objects.all()
-    serializer_class = ColorSerializer
-    permission_classes = [IsAdminUser]
-
-
-class AdminSizeViewSet(viewsets.ModelViewSet):
-    """
-    Admin-only viewset for size management
-    """
-    queryset = Size.objects.all().order_by('display_order')
-    serializer_class = SizeSerializer
-    permission_classes = [IsAdminUser]
-
-
-class AdminProductSizeViewSet(viewsets.ModelViewSet):
-    """
-    Admin-only viewset for product size management
-    """
-    queryset = ProductSize.objects.all()
-    serializer_class = AdminProductSizeSerializer
-    permission_classes = [IsAdminUser]
-    
-    def get_queryset(self):
-        queryset = super().get_queryset()
-        
-        # Filter by product
-        product_id = self.request.query_params.get('product')
-        if product_id:
-            queryset = queryset.filter(product_id=product_id)
-        
-        return queryset
-
-
-class AdminProductColorViewSet(viewsets.ModelViewSet):
-    """
-    Admin-only viewset for product color management
-    """
-    queryset = ProductColor.objects.all()
-    serializer_class = AdminProductColorSerializer
-    permission_classes = [IsAdminUser]
-    
-    def get_queryset(self):
-        queryset = super().get_queryset()
-        
-        # Filter by product
-        product_id = self.request.query_params.get('product')
-        if product_id:
-            queryset = queryset.filter(product_id=product_id)
-        
-        return queryset
-
-
-class AdminProductImageViewSet(viewsets.ModelViewSet):
-    """
-    Admin-only viewset for product image management
-    """
-    queryset = ProductImage.objects.all()
-    serializer_class = ProductImageSerializer
     permission_classes = [IsAdminUser]
     parser_classes = [parsers.MultiPartParser, parsers.FormParser]
     
-    def get_queryset(self):
-        queryset = super().get_queryset()
-        
-        # Filter by product
-        product_id = self.request.query_params.get('product')
-        if product_id:
-            queryset = queryset.filter(product_id=product_id)
-        
-        # Filter by color
-        color_id = self.request.query_params.get('color')
-        if color_id:
-            queryset = queryset.filter(color_id=color_id)
-        
-        return queryset.order_by('display_order')
-    
-
-    # Continue AdminProductImageViewSet class
-
-    def create(self, request, *args, **kwargs):
-        """
-        Create a new product image with proper association to product and optional color
-        """
-        # Validate required fields
-        product_id = request.data.get('product')
-        if not product_id:
-            return Response(
-                {'error': 'Product ID is required'}, 
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        # Get product
-        try:
-            product = Product.objects.get(id=product_id)
-        except Product.DoesNotExist:
-            return Response(
-                {'error': 'Product not found'}, 
-                status=status.HTTP_404_NOT_FOUND
-            )
-        
-        # Handle optional color association
-        color = None
-        color_id = request.data.get('color')
-        if color_id:
-            try:
-                color = ProductColor.objects.get(product=product, color_id=color_id)
-            except ProductColor.DoesNotExist:
-                return Response(
-                    {'error': 'Invalid color for this product'}, 
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-        
-        # Check if this image should be primary
-        is_primary = request.data.get('is_primary') == 'true'
-        if is_primary:
-            # If setting as primary, reset other primary images
-            if color:
-                # For color-specific images
-                ProductImage.objects.filter(
-                    product=product, 
-                    color=color, 
-                    is_primary=True
-                ).update(is_primary=False)
-            else:
-                # For non-color-specific images
-                ProductImage.objects.filter(
-                    product=product, 
-                    color__isnull=True, 
-                    is_primary=False
-                ).update(is_primary=False)
-        
-        # Continue with standard creation
-        return super().create(request, *args, **kwargs)
-
-    def update(self, request, *args, **kwargs):
-        """
-        Update a product image
-        """
-        # Check if updating primary status
-        is_primary = request.data.get('is_primary')
-        if is_primary == 'true':
-            instance = self.get_object()
-            
-            # Handle primary status for the relevant image group
-            if instance.color:
-                # Color-specific image
-                ProductImage.objects.filter(
-                    product=instance.product, 
-                    color=instance.color, 
-                    is_primary=True
-                ).exclude(pk=instance.pk).update(is_primary=False)
-            else:
-                # Non-color-specific image
-                ProductImage.objects.filter(
-                    product=instance.product, 
-                    color__isnull=True, 
-                    is_primary=True
-                ).exclude(pk=instance.pk).update(is_primary=False)
-        
-        return super().update(request, *args, **kwargs)
-
-    @action(detail=False, methods=['post'])
-    def bulk_upload(self, request):
+    def post(self, request, slug=None):
         """
         Upload multiple images at once for a product
         """
-        # Validate product
-        product_id = request.data.get('product')
-        if not product_id:
-            return Response(
-                {'error': 'Product ID is required'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        try:
-            product = Product.objects.get(id=product_id)
-        except Product.DoesNotExist:
-            return Response(
-                {'error': 'Product not found'},
-                status=status.HTTP_404_NOT_FOUND
-            )
+        product = get_object_or_404(Product, slug=slug)
         
         # Get color if provided
         color = None
@@ -501,69 +345,122 @@ class AdminProductImageViewSet(viewsets.ModelViewSet):
             )
             
             # Serialize and add to result list
-            serializer = self.get_serializer(product_image)
+            serializer = ProductImageSerializer(product_image, context={'request': request})
             created_images.append(serializer.data)
         
         return Response(created_images, status=status.HTTP_201_CREATED)
 
-    @action(detail=True, methods=['post'])
-    def set_primary(self, request, pk=None):
-        """
-        Set an image as the primary image for a product or color
-        """
-        # Get the image
-        image = self.get_object()
-        
-        # Reset primary status on other images in the same group
-        if image.color:
-            # Color-specific image
-            ProductImage.objects.filter(
-                product=image.product,
-                color=image.color,
-                is_primary=True
-            ).exclude(pk=image.pk).update(is_primary=False)
-        else:
-            # Non-color-specific image
-            ProductImage.objects.filter(
-                product=image.product,
-                color__isnull=True,
-                is_primary=True
-            ).exclude(pk=image.pk).update(is_primary=False)
-        
-        # Set this image as primary
-        image.is_primary = True
-        image.save()
-        
-        serializer = self.get_serializer(image)
-        return Response(serializer.data)
 
-    @action(detail=True, methods=['post'])
-    def update_display_order(self, request, pk=None):
-        """
-        Update the display order of an image
-        """
-        # Get the image
-        image = self.get_object()
+# Admin-only views for categories
+class AdminCategoryListCreateView(generics.ListCreateAPIView):
+    """
+    Admin-only view for listing and creating categories
+    """
+    queryset = Category.objects.all()
+    serializer_class = CategorySerializer
+    permission_classes = [IsAdminUser]
+
+
+
+class AdminCategoryRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
+    """
+    Admin-only view for retrieving, updating and deleting categories
+    """
+    queryset = Category.objects.all()
+    serializer_class = CategorySerializer
+    permission_classes = [IsAdminUser]
+    lookup_field = 'slug'
+
+
+# Admin-only views for colors
+class AdminColorListCreateView(generics.ListCreateAPIView):
+    """
+    Admin-only view for listing and creating colors
+    """
+    queryset = Color.objects.all()
+    serializer_class = ColorSerializer
+    permission_classes = [IsAdminUser]
+
+
+class AdminColorRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
+    """
+    Admin-only view for retrieving, updating and deleting colors
+    """
+    queryset = Color.objects.all()
+    serializer_class = ColorSerializer
+    permission_classes = [IsAdminUser]
+
+
+# Admin-only views for sizes
+class AdminSizeListCreateView(generics.ListCreateAPIView):
+    """
+    Admin-only view for listing and creating sizes
+    """
+    queryset = Size.objects.all().order_by('display_order')
+    serializer_class = SizeSerializer
+    permission_classes = [IsAdminUser]
+
+
+class AdminSizeRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
+    """
+    Admin-only view for retrieving, updating and deleting sizes
+    """
+    queryset = Size.objects.all()
+    serializer_class = SizeSerializer
+    permission_classes = [IsAdminUser]
+
+
+# Admin-only views for product sizes
+class AdminProductSizeListCreateView(generics.ListCreateAPIView):
+    """
+    Admin-only view for listing and creating product sizes
+    """
+    serializer_class = ProductSizeSerializer
+    permission_classes = [IsAdminUser]
+    
+    def get_queryset(self):
+        queryset = ProductSize.objects.all()
         
-        # Get new display order
-        display_order = request.data.get('display_order')
-        if display_order is None:
-            return Response(
-                {'error': 'Display order is required'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+        # Filter by product
+        product_id = self.request.query_params.get('product')
+        if product_id:
+            queryset = queryset.filter(product_id=product_id)
         
-        try:
-            display_order = int(display_order)
-        except ValueError:
-            return Response(
-                {'error': 'Display order must be a number'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+        return queryset
+
+
+class AdminProductSizeRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
+    """
+    Admin-only view for retrieving, updating and deleting product sizes
+    """
+    queryset = ProductSize.objects.all()
+    serializer_class = ProductSizeSerializer
+    permission_classes = [IsAdminUser]
+
+
+# Admin-only views for product colors
+class AdminProductColorListCreateView(generics.ListCreateAPIView):
+    """
+    Admin-only view for listing and creating product colors
+    """
+    serializer_class = ProductColorSerializer
+    permission_classes = [IsAdminUser]
+    
+    def get_queryset(self):
+        queryset = ProductColor.objects.all()
         
-        # Update display order
-        image.display_order = display_order
-        image.save()
+        # Filter by product
+        product_id = self.request.query_params.get('product')
+        if product_id:
+            queryset = queryset.filter(product_id=product_id)
         
-        serializer = self.get_serializer(image)
-        return Response(serializer.data)
+        return queryset
+
+
+class AdminProductColorRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
+    """
+    Admin-only view for retrieving, updating and deleting product colors
+    """
+    queryset = ProductColor.objects.all()
+    serializer_class = ProductColorSerializer
+    permission_classes = [IsAdminUser]

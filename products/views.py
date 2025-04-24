@@ -1,7 +1,7 @@
-# products/views.py
-from rest_framework import generics, permissions, status, filters
-from rest_framework.response import Response
+# products/views.py - Updated to contain only read-only views for regular users
+from rest_framework import generics, permissions, filters
 from rest_framework.views import APIView
+from rest_framework.response import Response
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from django_filters.rest_framework import DjangoFilterBackend
@@ -12,18 +12,17 @@ from .models import (
 )
 from .serializers import (
     CategorySerializer, CategoryListSerializer, ColorSerializer, SizeSerializer,
-    ProductListSerializer, ProductDetailSerializer, ProductCreateUpdateSerializer,
+    ProductListSerializer, ProductDetailSerializer,
     ProductImageSerializer, ProductSizeSerializer, ProductColorSerializer
 )
-from core.permissions import IsAdminUserOrReadOnly
 
 # Category Views
-class CategoryListView(generics.ListCreateAPIView):
+class CategoryListView(generics.ListAPIView):
     """
-    List all categories or create a new one
+    List all categories with images (either their own or from products)
     """
-    permission_classes = [IsAdminUserOrReadOnly]
     serializer_class = CategoryListSerializer
+    permission_classes = [permissions.AllowAny]
     
     def get_queryset(self):
         queryset = Category.objects.filter(is_active=True)
@@ -34,17 +33,25 @@ class CategoryListView(generics.ListCreateAPIView):
             queryset = queryset.filter(parent__isnull=True)
         elif parent:
             queryset = queryset.filter(parent__slug=parent)
-            
+        
+        # Filter to include only categories with images or with products that have images
+        queryset = queryset.filter(
+            # Categories with their own image
+            Q(image__isnull=False) & ~Q(image='') |
+            # Categories with products that have images
+            Q(products__images__isnull=False)
+        ).distinct()
+        
         return queryset.order_by('display_order', 'name')
 
 
-class CategoryDetailView(generics.RetrieveUpdateDestroyAPIView):
+class CategoryDetailView(generics.RetrieveAPIView):
     """
-    Retrieve, update or delete a category
+    Retrieve a category
     """
     queryset = Category.objects.filter(is_active=True)
     serializer_class = CategorySerializer
-    permission_classes = [IsAdminUserOrReadOnly]
+    permission_classes = [permissions.AllowAny]
     lookup_field = 'slug'
 
 
@@ -62,58 +69,54 @@ class CategoryProductsView(generics.ListAPIView):
 
 
 # Color Views
-class ColorListCreateView(generics.ListCreateAPIView):
+class ColorListView(generics.ListAPIView):
     """
-    List all colors or create a new one
-    """
-    queryset = Color.objects.all()
-    serializer_class = ColorSerializer
-    permission_classes = [IsAdminUserOrReadOnly]
-
-
-class ColorDetailView(generics.RetrieveUpdateDestroyAPIView):
-    """
-    Retrieve, update or delete a color
+    List all colors
     """
     queryset = Color.objects.all()
     serializer_class = ColorSerializer
-    permission_classes = [IsAdminUserOrReadOnly]
+    permission_classes = [permissions.AllowAny]
+
+
+class ColorDetailView(generics.RetrieveAPIView):
+    """
+    Retrieve a color
+    """
+    queryset = Color.objects.all()
+    serializer_class = ColorSerializer
+    permission_classes = [permissions.AllowAny]
 
 
 # Size Views
-class SizeListCreateView(generics.ListCreateAPIView):
+class SizeListView(generics.ListAPIView):
     """
-    List all sizes or create a new one
+    List all sizes
     """
     queryset = Size.objects.all().order_by('display_order')
     serializer_class = SizeSerializer
-    permission_classes = [IsAdminUserOrReadOnly]
+    permission_classes = [permissions.AllowAny]
 
 
-class SizeDetailView(generics.RetrieveUpdateDestroyAPIView):
+class SizeDetailView(generics.RetrieveAPIView):
     """
-    Retrieve, update or delete a size
+    Retrieve a size
     """
     queryset = Size.objects.all()
     serializer_class = SizeSerializer
-    permission_classes = [IsAdminUserOrReadOnly]
+    permission_classes = [permissions.AllowAny]
 
 
 # Product Views
-class ProductListCreateView(generics.ListCreateAPIView):
+class ProductListView(generics.ListAPIView):
     """
-    List all products or create a new one
+    List all products
     """
-    permission_classes = [IsAdminUserOrReadOnly]
+    permission_classes = [permissions.AllowAny]
+    serializer_class = ProductListSerializer
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['category', 'is_new', 'is_bestseller', 'in_stock']
     search_fields = ['name', 'description', 'short_description']
     ordering_fields = ['price', 'created_at', 'name']
-    
-    def get_serializer_class(self):
-        if self.request.method == 'POST':
-            return ProductCreateUpdateSerializer
-        return ProductListSerializer
     
     def get_queryset(self):
         queryset = Product.objects.filter(is_active=True)
@@ -158,17 +161,13 @@ class ProductListCreateView(generics.ListCreateAPIView):
         return queryset
 
 
-class ProductDetailView(generics.RetrieveUpdateDestroyAPIView):
+class ProductDetailView(generics.RetrieveAPIView):
     """
-    Retrieve, update or delete a product
+    Retrieve a product
     """
-    permission_classes = [IsAdminUserOrReadOnly]
-    lookup_field = 'pk'
-    
-    def get_serializer_class(self):
-        if self.request.method in ['PUT', 'PATCH']:
-            return ProductCreateUpdateSerializer
-        return ProductDetailSerializer
+    permission_classes = [permissions.AllowAny]
+    serializer_class = ProductDetailSerializer
+    lookup_field = 'slug'
     
     def get_queryset(self):
         return Product.objects.filter(is_active=True)
@@ -223,89 +222,195 @@ class NewArrivalsView(generics.ListAPIView):
         return Product.objects.filter(is_new=True, is_active=True)[:8]
 
 
-# Admin-only views for product management
-class ProductImageListCreateView(generics.ListCreateAPIView):
+# products/views_user.py - Add views for authenticated users to manage wishlist and reviews
+from rest_framework import generics, permissions, status
+from rest_framework.response import Response
+from rest_framework.views import APIView
+from django.shortcuts import get_object_or_404
+
+from .models import (
+    Product, Wishlist, WishlistItem, ProductReview
+)
+from .serializers import (
+    WishlistSerializer, WishlistItemSerializer, ProductReviewSerializer
+)
+
+# Custom permission class for wishlist operations
+class IsWishlistOwner(permissions.BasePermission):
     """
-    List all product images or create a new one (admin only)
+    Custom permission to only allow owners of a wishlist to view or edit it.
     """
-    serializer_class = ProductImageSerializer
-    permission_classes = [permissions.IsAdminUser]
+    def has_object_permission(self, request, view, obj):
+        # Check if the user is the owner of the wishlist
+        return obj.user == request.user
+
+# Wishlist Views
+class WishlistListCreateView(generics.ListCreateAPIView):
+    """
+    List all wishlists for the current user or create a new wishlist
+    """
+    serializer_class = WishlistSerializer
+    permission_classes = [permissions.IsAuthenticated]
     
     def get_queryset(self):
-        queryset = ProductImage.objects.all()
-        
-        # Filter by product
-        product_id = self.request.query_params.get('product')
-        if product_id:
-            queryset = queryset.filter(product_id=product_id)
-        
-        # Filter by color
-        color_id = self.request.query_params.get('color')
-        if color_id:
-            queryset = queryset.filter(color_id=color_id)
-        
-        return queryset.order_by('display_order')
+        return Wishlist.objects.filter(user=self.request.user)
+    
+    def perform_create(self, serializer):
+        serializer.save(user=self.request.user)
 
 
-class ProductImageDetailView(generics.RetrieveUpdateDestroyAPIView):
+class WishlistDetailView(generics.RetrieveUpdateDestroyAPIView):
     """
-    Retrieve, update or delete a product image (admin only)
+    Retrieve, update or delete a wishlist
     """
-    queryset = ProductImage.objects.all()
-    serializer_class = ProductImageSerializer
-    permission_classes = [permissions.IsAdminUser]
-
-
-class ProductSizeListCreateView(generics.ListCreateAPIView):
-    """
-    List all product sizes or create a new one (admin only)
-    """
-    serializer_class = ProductSizeSerializer
-    permission_classes = [permissions.IsAdminUser]
+    serializer_class = WishlistSerializer
+    permission_classes = [permissions.IsAuthenticated, IsWishlistOwner]
     
     def get_queryset(self):
-        queryset = ProductSize.objects.all()
+        return Wishlist.objects.filter(user=self.request.user)
+
+
+class WishlistItemCreateView(generics.CreateAPIView):
+    """
+    Add a product to a wishlist
+    """
+    serializer_class = WishlistItemSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    
+    def perform_create(self, serializer):
+        # Get the wishlist
+        wishlist_id = self.kwargs.get('wishlist_id')
+        wishlist = get_object_or_404(Wishlist, id=wishlist_id, user=self.request.user)
         
-        # Filter by product
-        product_id = self.request.query_params.get('product')
-        if product_id:
-            queryset = queryset.filter(product_id=product_id)
-        
-        return queryset
+        # Save the wishlist item
+        serializer.save(wishlist=wishlist)
 
 
-class ProductSizeDetailView(generics.RetrieveUpdateDestroyAPIView):
+class WishlistItemDetailView(generics.RetrieveUpdateDestroyAPIView):
     """
-    Retrieve, update or delete a product size (admin only)
+    Retrieve, update or delete a wishlist item
     """
-    queryset = ProductSize.objects.all()
-    serializer_class = ProductSizeSerializer
-    permission_classes = [permissions.IsAdminUser]
-
-
-
-class ProductColorListCreateView(generics.ListCreateAPIView):
-    """
-    List all product colors or create a new one (admin only)
-    """
-    serializer_class = ProductColorSerializer
-    permission_classes = [permissions.IsAdminUser]
+    serializer_class = WishlistItemSerializer
+    permission_classes = [permissions.IsAuthenticated]
     
     def get_queryset(self):
-        queryset = ProductColor.objects.all()
-        
-        # Filter by product
-        product_id = self.request.query_params.get('product')
-        if product_id:
-            queryset = queryset.filter(product_id=product_id)
-        
-        return queryset
+        wishlist_id = self.kwargs.get('wishlist_id')
+        return WishlistItem.objects.filter(wishlist__id=wishlist_id, wishlist__user=self.request.user)
 
 
-class ProductColorDetailView(generics.RetrieveUpdateDestroyAPIView):
+class AddToDefaultWishlistView(APIView):
     """
-    Retrieve, update or delete a product color (admin only)
+    Add a product to the user's default wishlist (creates a default wishlist if none exists)
     """
-    queryset = ProductColor.objects.all()
-    serializer_class = ProductColorSerializer
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [permissions.IsAuthenticated]
+    
+    def post(self, request):
+        # Get product ID from request data
+        product_id = request.data.get('product_id')
+        if not product_id:
+            return Response({"error": "Product ID is required"}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Get or create default wishlist
+        default_wishlist, created = Wishlist.objects.get_or_create(
+            user=request.user,
+            name="Default",
+            defaults={'is_public': False}
+        )
+        
+        # Get other optional parameters
+        selected_size = request.data.get('selected_size')
+        selected_color = request.data.get('selected_color')
+        notes = request.data.get('notes', '')
+        
+        # Check if product exists
+        product = get_object_or_404(Product, id=product_id)
+        
+        # Check if item already exists in wishlist
+        existing_item = WishlistItem.objects.filter(
+            wishlist=default_wishlist,
+            product=product
+        ).first()
+        
+        if existing_item:
+            # Update existing item
+            existing_item.selected_size = selected_size
+            existing_item.selected_color = selected_color
+            existing_item.notes = notes
+            existing_item.save()
+            serializer = WishlistItemSerializer(existing_item)
+            return Response(serializer.data)
+        else:
+            # Create new item
+            wishlist_item = WishlistItem.objects.create(
+                wishlist=default_wishlist,
+                product=product,
+                selected_size=selected_size,
+                selected_color=selected_color,
+                notes=notes
+            )
+            serializer = WishlistItemSerializer(wishlist_item)
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+# Product Review Views
+class ProductReviewListCreateView(generics.ListCreateAPIView):
+    """
+    List all reviews for a product or create a new review
+    """
+    serializer_class = ProductReviewSerializer
+    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+    
+    def get_queryset(self):
+        product_slug = self.kwargs.get('slug')
+        return ProductReview.objects.filter(
+            product__slug=product_slug,
+            is_approved=True
+        ).order_by('-created_at')
+    
+    def perform_create(self, serializer):
+        # Get the product
+        product_slug = self.kwargs.get('slug')
+        product = get_object_or_404(Product, slug=product_slug)
+        
+        # Check if user has already reviewed this product
+        existing_review = ProductReview.objects.filter(
+            product=product,
+            user=self.request.user
+        ).exists()
+        
+        if existing_review:
+            from rest_framework.exceptions import ValidationError
+            raise ValidationError("You have already reviewed this product")
+        
+        # Save the review
+        serializer.save(
+            product=product, 
+            user=self.request.user,
+            # You could implement logic here to check if user has purchased the product
+            is_verified_purchase=False
+        )
+
+
+class ProductReviewDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """
+    Retrieve, update or delete a review
+    """
+    serializer_class = ProductReviewSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    
+    def get_queryset(self):
+        # User can only access their own reviews
+        return ProductReview.objects.filter(user=self.request.user)
+
+
+class UserReviewsListView(generics.ListAPIView):
+    """
+    List all reviews by the current user
+    """
+    serializer_class = ProductReviewSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    
+    def get_queryset(self):
+        return ProductReview.objects.filter(
+            user=self.request.user
+        ).order_by('-created_at')

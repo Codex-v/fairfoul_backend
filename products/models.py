@@ -1,9 +1,13 @@
 # products/models.py
 from django.db import models
-from django.core.validators import MinValueValidator
+from django.core.validators import MinValueValidator,MaxValueValidator
 from django.utils.text import slugify
 from core.models import TimestampedModel
 from core.utils import get_file_path
+from django.contrib.auth import authenticate, get_user_model
+
+
+User = get_user_model()
 
 class Category(TimestampedModel):
     """
@@ -218,3 +222,59 @@ class ProductSpecification(models.Model):
     
     def __str__(self):
         return f"{self.product.name} - {self.title}"
+    
+
+
+# products/models.py - Add these models to your existing models.py file
+
+class ProductReview(TimestampedModel):
+    """
+    Model for product reviews and ratings
+    """
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='reviews')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reviews')
+    rating = models.PositiveSmallIntegerField(validators=[MinValueValidator(1), MaxValueValidator(5)])
+    title = models.CharField(max_length=100)
+    content = models.TextField(blank=True)
+    is_verified_purchase = models.BooleanField(default=False)
+    is_approved = models.BooleanField(default=True)  # Auto-approve or require admin approval
+    
+    class Meta:
+        unique_together = ('product', 'user')  # One review per product per user
+        ordering = ['-created_at']
+    
+    def __str__(self):
+        return f"{self.product.name} - {self.rating} Stars by {self.user.email}"
+
+
+class Wishlist(TimestampedModel):
+    """
+    Model for user wishlists
+    """
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='wishlists')
+    name = models.CharField(max_length=100, default="My Wishlist")
+    is_public = models.BooleanField(default=False)
+    
+    class Meta:
+        unique_together = ('user', 'name')
+        
+    def __str__(self):
+        return f"{self.user.email} - {self.name}"
+
+
+class WishlistItem(TimestampedModel):
+    """
+    Model for items in a wishlist
+    """
+    wishlist = models.ForeignKey(Wishlist, on_delete=models.CASCADE, related_name='items')
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='wishlist_items')
+    selected_size = models.ForeignKey(Size, on_delete=models.SET_NULL, null=True, blank=True)
+    selected_color = models.ForeignKey(Color, on_delete=models.SET_NULL, null=True, blank=True)
+    notes = models.TextField(blank=True)
+    
+    class Meta:
+        unique_together = ('wishlist', 'product')
+        ordering = ['-created_at']
+        
+    def __str__(self):
+        return f"{self.product.name} in {self.wishlist.name}"
