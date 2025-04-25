@@ -14,7 +14,7 @@ urlpatterns = [
     path('cart/items/<int:pk>/', CartItemDetailView.as_view(), name='cart-item-detail'),
     path('cart/clear/', CartClearView.as_view(), name='cart-clear'),
     path('cart/items/<int:pk>/update-quantity/', CartItemQuantityUpdateView.as_view(), name='cart-item-quantity'),
-    # path('cart/items/<int:pk>/update-quantity/', CartItemQuantityUpdateView.as_view(), name='cart-item-quantity'),
+   
     path('cart/items/<int:pk>/update_quantity/', CartItemQuantityUpdateView.as_view(), name='cart-item-quantity'),
     # Order endpoints
     path('orders/', OrderListCreateView.as_view(), name='order-list'),
